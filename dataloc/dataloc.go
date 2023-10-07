@@ -24,11 +24,26 @@ func debugf(format string, args ...interface{}) {
 	}
 }
 
+// L returns the source code location of the test case identified by its name.
+// See Example.
+// It attempts runtime source code analysis to find the location
+// by using the expression passed to dataloc.L().
+// So some restrictions apply:
+// - The function must be invoked as "dataloc.L".
+// - The argument must be an expression of the form "testcase.key",
+// - where "testcase" is a variable declared as "for _, testcase := range testcases",
+// - and "testcases" is a slice of a struct type,
+// - whose "key" field is a string which is passsed to L().
 func L(name string) string {
 	s, _ := loc(name)
 	return s
 }
 
+// TODO: allow testcases to be a map, eg
+//
+//	for name, testcase := range testcases {
+//	  ... dataloc.L(name) ...
+//	}
 func loc(value string) (string, error) {
 	_, file, line, _ := runtime.Caller(2)
 
