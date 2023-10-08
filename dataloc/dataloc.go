@@ -64,13 +64,17 @@ func loc(value string) (string, error) {
 
 	objToTypeDecl := make(map[*ast.Object]ast.Expr)
 	objToVarInit := make(map[*ast.Object]ast.Expr)
-	// make [ v ↦ expr ] mapping from "for _, v := range expr"
-	objToRangeExpr := make(map[*ast.Object]ast.Expr)
+	// make [ v ↦ expr ] mapping from "for k, v := range expr"
+	objToRangeExprForValue := make(map[*ast.Object]ast.Expr)
+	objToRangeExprForKey := make(map[*ast.Object]ast.Expr)
 
 	ast.Inspect(f, func(n ast.Node) bool {
 		if rangeStmt, ok := n.(*ast.RangeStmt); ok {
 			if ident, ok := rangeStmt.Value.(*ast.Ident); ok {
-				objToRangeExpr[ident.Obj] = rangeStmt.X
+				objToRangeExprForValue[ident.Obj] = rangeStmt.X
+			}
+			if ident, ok := rangeStmt.Key.(*ast.Ident); ok {
+				objToRangeExprForKey[ident.Obj] = rangeStmt.X
 			}
 		} else if decl, ok := n.(ast.Decl); ok {
 			if genDecl, ok := decl.(*ast.GenDecl); ok {
@@ -120,19 +124,43 @@ func loc(value string) (string, error) {
 			return true
 		}
 
+		// for example:
+		//   testcases := []struct{}{...}
+		//   for _, testdata := range testcases {
+		//     dataloc.L(testdata.name)
+		//   }
 		if call, ok := isMethodCall(n, "dataloc", "L"); ok {
 			debugf("found %+v", n)
-			// eg. test.key
-			if ident, key, ok := isSelector(call.Args[0]); ok {
+			arg := call.Args[0]
+			// ident = testdata, key = name
+			if ident, key, ok := isSelector(arg); ok {
 				debugf("arg[0]: %s.%s", ident, key)
 
-				if expr, ok := objToRangeExpr[ident.Obj]; ok {
+				// expr = testcases
+				if expr, ok := objToRangeExprForValue[ident.Obj]; ok {
 					debugf("range: %s", expr)
 
 					if sourceIdent, ok := expr.(*ast.Ident); ok {
+						// varInit = []struct{}{...}
 						varInit := objToVarInit[sourceIdent.Obj]
 						debugf("varInit: %+v", varInit)
 						node := findTestCaseItem(varInit, key, value, objToTypeDecl)
+						if node != nil {
+							debugf("⭐ pos: %s", fset.Position(node.Pos()))
+							pos := fset.Position(node.Pos())
+							loc = fmt.Sprintf("%s:%d", pos.Filename, pos.Line)
+							return false
+						}
+					}
+				}
+			} else if ident, ok := arg.(*ast.Ident); ok {
+				// for k, v := range testcases {
+				//   dataloc.L(k)
+				// }
+				if expr, ok := objToRangeExprForKey[ident.Obj]; ok {
+					if sourceIdent, ok := expr.(*ast.Ident); ok {
+						varInit := objToVarInit[sourceIdent.Obj]
+						node := findTestCaseItem(varInit, ident.Name, value, objToTypeDecl)
 						if node != nil {
 							debugf("⭐ pos: %s", fset.Position(node.Pos()))
 							pos := fset.Position(node.Pos())
@@ -186,13 +214,29 @@ func findTestCaseItem(init ast.Expr, key, value string, objToTypeDecl map[*ast.O
 				return nil
 			}
 		}
+	} else if m, ok := testcases.Type.(*ast.MapType); ok {
+		testcaseType = m
 	} else {
 		// testcases should be an array eg.
 		//   testcases := []testcase{ ... }
+		// or a map eg.
+		//   testcases := map[string]testcase{ ... }
+		debugf("unexpected testcase type: %#v", testcases.Type)
 		return nil
 	}
 
 	for _, testcase := range testcases.Elts {
+		debugf("testacse: %v (%T)", testcase, testcase)
+
+		if kv, ok := testcase.(*ast.KeyValueExpr); ok {
+			if basic, ok := kv.Key.(*ast.BasicLit); ok {
+				debugf("item basic=%v (%T) vs %q", basic, basic, value)
+				if isStringLiteral(basic, value) {
+					return kv
+				}
+			}
+		}
+
 		testcase, ok := testcase.(*ast.CompositeLit)
 		if !ok {
 			// testcase should be a struct literal eg.

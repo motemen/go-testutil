@@ -73,3 +73,20 @@ func TestL_caseTypeInline(t *testing.T) {
 		})
 	}
 }
+
+func TestL_caseTypeMap(t *testing.T) {
+	tests := map[string]struct {
+		line int
+	}{
+		"test1": {line: __line__()},
+		"test2": {line: __line__()},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got, expected := dataloc.L(name), fmt.Sprintf("%s:%d", file, test.line); got != expected {
+				t.Errorf("expected %q, got %q", expected, got)
+			}
+		})
+	}
+}
