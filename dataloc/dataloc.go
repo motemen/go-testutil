@@ -25,25 +25,25 @@ func debugf(format string, args ...interface{}) {
 }
 
 // L returns the source code location of the test case identified by its name.
-// See Example.
 // It attempts runtime source code analysis to find the location
 // by using the expression passed to dataloc.L().
 // So some restrictions apply:
-// - The function must be invoked as "dataloc.L".
-// - The argument must be an expression of the form "testcase.key",
-// - where "testcase" is a variable declared as "for _, testcase := range testcases",
-// - and "testcases" is a slice of a struct type,
-// - whose "key" field is a string which is passsed to L().
+//   - The function must be invoked as "dataloc.L".
+//   - The argument must be an expression of the form "dataloc.L(testcase.key)"
+//     , where "testcase" is a variable declared as "for _, testcase := range testcases"
+//     , and "testcases" is a slice of a struct type
+//     , whose "key" field is a string which is passsed to L().
+//   - or "dataloc.L(key)"
+//     , where key is a variable declared as "for key, value := range testcases"
+//     , and "testcases" is a map of string to any type
+//     , and "key" is the string which is passed to L().
+//
+// See Example.
 func L(name string) string {
 	s, _ := loc(name)
 	return s
 }
 
-// TODO: allow testcases to be a map, eg
-//
-//	for name, testcase := range testcases {
-//	  ... dataloc.L(name) ...
-//	}
 func loc(value string) (string, error) {
 	_, file, line, _ := runtime.Caller(2)
 
@@ -62,10 +62,13 @@ func loc(value string) (string, error) {
 		return "", err
 	}
 
+	// [ t ↦ expr ] for "type t struct{ ... }"
 	objToTypeDecl := make(map[*ast.Object]ast.Expr)
+	// [ v ↦ expr ] for "v := ..."
 	objToVarInit := make(map[*ast.Object]ast.Expr)
-	// make [ v ↦ expr ] mapping from "for k, v := range expr"
+	// [ v ↦ expr ] for "for k, v := range expr"
 	objToRangeExprForValue := make(map[*ast.Object]ast.Expr)
+	// [ k ↦ expr ] for "for k, v := range expr"
 	objToRangeExprForKey := make(map[*ast.Object]ast.Expr)
 
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -78,7 +81,6 @@ func loc(value string) (string, error) {
 			}
 		} else if decl, ok := n.(ast.Decl); ok {
 			if genDecl, ok := decl.(*ast.GenDecl); ok {
-				debugf("declStmt: %+v", genDecl)
 				if genDecl.Tok == token.VAR {
 					for _, spec := range genDecl.Specs {
 						if valueSpec, ok := spec.(*ast.ValueSpec); ok {
@@ -96,7 +98,6 @@ func loc(value string) (string, error) {
 				}
 			}
 		} else if assignStmt, ok := n.(*ast.AssignStmt); ok {
-			debugf("assignStmt: %+v", assignStmt)
 			for i, expr := range assignStmt.Lhs {
 				if ident, ok := expr.(*ast.Ident); ok {
 					if len(assignStmt.Lhs) == len(assignStmt.Rhs) {
@@ -130,23 +131,16 @@ func loc(value string) (string, error) {
 		//     dataloc.L(testdata.name)
 		//   }
 		if call, ok := isMethodCall(n, "dataloc", "L"); ok {
-			debugf("found %+v", n)
 			arg := call.Args[0]
 			// ident = testdata, key = name
 			if ident, key, ok := isSelector(arg); ok {
-				debugf("arg[0]: %s.%s", ident, key)
-
 				// expr = testcases
 				if expr, ok := objToRangeExprForValue[ident.Obj]; ok {
-					debugf("range: %s", expr)
-
-					if sourceIdent, ok := expr.(*ast.Ident); ok {
-						// varInit = []struct{}{...}
-						varInit := objToVarInit[sourceIdent.Obj]
-						debugf("varInit: %+v", varInit)
-						node := findTestCaseItem(varInit, key, value, objToTypeDecl)
+					if testcasesIdent, ok := expr.(*ast.Ident); ok {
+						// testcasesExpr = []struct{}{...}
+						testcasesExpr := objToVarInit[testcasesIdent.Obj]
+						node := findTestCaseItem(testcasesExpr, key, value, objToTypeDecl)
 						if node != nil {
-							debugf("⭐ pos: %s", fset.Position(node.Pos()))
 							pos := fset.Position(node.Pos())
 							loc = fmt.Sprintf("%s:%d", pos.Filename, pos.Line)
 							return false
@@ -158,11 +152,10 @@ func loc(value string) (string, error) {
 				//   dataloc.L(k)
 				// }
 				if expr, ok := objToRangeExprForKey[ident.Obj]; ok {
-					if sourceIdent, ok := expr.(*ast.Ident); ok {
-						varInit := objToVarInit[sourceIdent.Obj]
-						node := findTestCaseItem(varInit, ident.Name, value, objToTypeDecl)
+					if testcasesIdent, ok := expr.(*ast.Ident); ok {
+						testcasesExpr := objToVarInit[testcasesIdent.Obj]
+						node := findTestCaseItem(testcasesExpr, ident.Name, value, objToTypeDecl)
 						if node != nil {
-							debugf("⭐ pos: %s", fset.Position(node.Pos()))
 							pos := fset.Position(node.Pos())
 							loc = fmt.Sprintf("%s:%d", pos.Filename, pos.Line)
 							return false
@@ -226,11 +219,8 @@ func findTestCaseItem(init ast.Expr, key, value string, objToTypeDecl map[*ast.O
 	}
 
 	for _, testcase := range testcases.Elts {
-		debugf("testacse: %v (%T)", testcase, testcase)
-
 		if kv, ok := testcase.(*ast.KeyValueExpr); ok {
 			if basic, ok := kv.Key.(*ast.BasicLit); ok {
-				debugf("item basic=%v (%T) vs %q", basic, basic, value)
 				if isStringLiteral(basic, value) {
 					return kv
 				}
@@ -251,7 +241,6 @@ func findTestCaseItem(init ast.Expr, key, value string, objToTypeDecl map[*ast.O
 				// { <key>: <value>, ... }
 				if ident, ok := kv.Key.(*ast.Ident); ok {
 					if ident.Name == key {
-						debugf("item value=%v (%T) vs %q", kv.Value, kv.Value, value)
 						if isStringLiteral(kv.Value, value) {
 							return testcase
 						}
@@ -259,7 +248,6 @@ func findTestCaseItem(init ast.Expr, key, value string, objToTypeDecl map[*ast.O
 				}
 			} else if basic, ok := field.(*ast.BasicLit); ok {
 				// { <value>, ...}
-				debugf("item basic=%v (%T) vs %q", basic, basic, value)
 				if findStructFieldIndex(testcaseType, key) == i {
 					if isStringLiteral(basic, value) {
 						return testcase
