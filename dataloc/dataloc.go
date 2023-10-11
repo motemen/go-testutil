@@ -1,3 +1,5 @@
+// Package dataloc provides functionality to find the source code location of
+// table-driven test cases.
 package dataloc
 
 import (
@@ -11,18 +13,6 @@ import (
 	"runtime"
 	"strconv"
 )
-
-func logf(format string, args ...interface{}) {
-	log.Printf(format, args...)
-}
-
-const debug = false
-
-func debugf(format string, args ...interface{}) {
-	if debug {
-		log.Printf("debug: "+format, args...)
-	}
-}
 
 // L returns the source code location of the test case identified by its name.
 // It attempts runtime source code analysis to find the location
@@ -286,4 +276,16 @@ func findStructFieldIndex(t ast.Expr, name string) int {
 	}
 
 	return -1
+}
+
+func logf(format string, args ...interface{}) {
+	log.Printf(format, args...)
+}
+
+const debug = false
+
+func debugf(format string, args ...interface{}) {
+	if debug {
+		log.Printf("debug: "+format, args...)
+	}
 }

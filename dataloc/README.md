@@ -1,5 +1,12 @@
-package dataloc_test
+# dataloc
 
+[![PkgGoDev](https://pkg.go.dev/badge/github.com/motemen/go-testutil/dataloc)](https://pkg.go.dev/github.com/motemen/go-testutil/dataloc)
+
+Package dataloc provides functionality to find the source code location of table-driven test cases.
+
+## Example
+
+~~~go
 import (
 	"fmt"
 
@@ -36,3 +43,5 @@ func Example() {
 	// expected -1 but got 300, test case at example_test.go:15
 	// expected 99 but got 2, test case at example_test.go:21
 }
+~~~
+
