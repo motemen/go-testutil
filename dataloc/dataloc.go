@@ -75,7 +75,9 @@ func loc(value string) (string, error) {
 					for _, spec := range genDecl.Specs {
 						if valueSpec, ok := spec.(*ast.ValueSpec); ok {
 							for i, name := range valueSpec.Names {
-								objToVarInit[name.Obj] = valueSpec.Values[i]
+								if i < len(valueSpec.Values)-1 {
+									objToVarInit[name.Obj] = valueSpec.Values[i]
+								}
 							}
 						}
 					}

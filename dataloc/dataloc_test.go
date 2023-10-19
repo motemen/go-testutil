@@ -11,6 +11,8 @@ import (
 
 var file = "dataloc_test.go"
 
+var varWithoutRHS string
+
 func __line__() int {
 	_, _, line, _ := runtime.Caller(1)
 	return line
